@@ -151,6 +151,22 @@ export class OrgRoamDb {
     return rows.map((r) => unquote(r.tag));
   }
 
+  /** All top-level nodes (one per file: org-roam stores file-level nodes at level 0). */
+  async listFileNodes(): Promise<Array<{ id: string; file: string; title: string; hash: string }>> {
+    const rows = this.q<{ id: string; file: string; title: string; hash: string }>(
+      `SELECT n.id, n.file, n.title, f.hash
+       FROM nodes n
+       JOIN files f ON f.file = n.file
+       WHERE n.level = 0`,
+    ).all();
+    return rows.map((r) => ({
+      id: unquote(r.id),
+      file: unquote(r.file),
+      title: unquote(r.title),
+      hash: unquote(r.hash),
+    }));
+  }
+
   /** Resolve a node ID to its file path (unwrapped). */
   async nodeFile(id: string): Promise<string | null> {
     const r = this.db

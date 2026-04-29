@@ -58,6 +58,8 @@ export interface BrainEngine {
   listPages(filters?: PageFilters): Promise<OrgPage[]>;
   /** Every Org Roam ID known to the brain. */
   getAllIds(): Promise<Set<string>>;
+  /** Map of page id → stored content_hash (omits pages with NULL hash). */
+  getPageHashes(): Promise<Map<string, string>>;
 
   // Search
   searchKeyword(query: string, opts?: SearchOpts): Promise<SearchResult[]>;

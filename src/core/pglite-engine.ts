@@ -113,16 +113,17 @@ export class PgliteEngine implements BrainEngine {
     delete (properties as Record<string, unknown>).FILE;
 
     await this.pg.query(
-      `INSERT INTO pages (id, file, title, compiled_truth, timeline, properties, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb, now())
+      `INSERT INTO pages (id, file, title, compiled_truth, timeline, properties, content_hash, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, now())
        ON CONFLICT (id) DO UPDATE SET
          file = EXCLUDED.file,
          title = EXCLUDED.title,
          compiled_truth = EXCLUDED.compiled_truth,
          timeline = EXCLUDED.timeline,
          properties = EXCLUDED.properties,
+         content_hash = COALESCE(EXCLUDED.content_hash, pages.content_hash),
          updated_at = now()`,
-      [id, file, input.title, input.compiled_truth, input.timeline ?? "", JSON.stringify(properties)],
+      [id, file, input.title, input.compiled_truth, input.timeline ?? "", JSON.stringify(properties), input.content_hash ?? null],
     );
 
     if (input.tags) await this.replaceTags(id, input.tags);
@@ -175,6 +176,15 @@ export class PgliteEngine implements BrainEngine {
   async getAllIds(): Promise<Set<string>> {
     const r = await this.pg.query<{ id: string }>(`SELECT id FROM pages`);
     return new Set(r.rows.map((row) => row.id));
+  }
+
+  async getPageHashes(): Promise<Map<string, string>> {
+    const r = await this.pg.query<{ id: string; content_hash: string | null }>(
+      `SELECT id, content_hash FROM pages WHERE content_hash IS NOT NULL`,
+    );
+    const out = new Map<string, string>();
+    for (const row of r.rows) if (row.content_hash) out.set(row.id, row.content_hash);
+    return out;
   }
 
   // --- Search ---

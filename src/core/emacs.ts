@@ -3,7 +3,9 @@
 // once per client and forwards calls.
 
 import { spawn } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { readFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export interface EmacsClientOptions {
@@ -61,8 +63,9 @@ export class EmacsClient {
   }
 
   private async doInit(): Promise<void> {
+    const elispFile = resolve(this.elispDir, "roambrain.el");
     const expr = `(condition-case err
-            (progn (require 'roambrain) (json-encode "ok"))
+            (progn (load-file ${elispString(elispFile)}) (json-encode "ok"))
           (error (json-encode (format "ERR: %S" err))))`;
     const out = await this.evalRaw(expr);
     const result = JSON.parse(JSON.parse(out.trimEnd()) as string) as string;
@@ -94,11 +97,21 @@ export class EmacsClient {
   /**
    * Call a roambrain-* function whose body already returns a JSON-encoded
    * string. Saves a redundant outer `json-encode` round-trip.
+   *
+   * Routes through a temp file because emacs server's chunked-print protocol
+   * truncates / mis-frames outputs over ~1KB (`Unknown message: p` errors).
    */
   async callJson<T = unknown>(callExpr: string): Promise<T> {
-    const out = await this.eval(callExpr);
-    const inner = JSON.parse(out.trimEnd()) as string;
-    return JSON.parse(inner) as T;
+    await this.init();
+    const tmp = join(tmpdir(), `roambrain-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    const wrapper = `(roambrain-write-result ${elispString(tmp)} ${elispString(callExpr)})`;
+    try {
+      await this.evalRaw(wrapper);
+      const raw = readFileSync(tmp, "utf8");
+      return JSON.parse(raw) as T;
+    } finally {
+      try { unlinkSync(tmp); } catch { /* ignore */ }
+    }
   }
 
   /** Internal: spawn emacsclient without the init guard. */
@@ -128,7 +141,7 @@ export class EmacsClient {
           reject(new EmacsError(`emacsclient exited ${code}: ${stderr.trim()}`, stderr, code));
           return;
         }
-        resolve(stdout);
+        resolve(decodeEmacsclientOutput(stdout));
       });
     });
   }
@@ -162,6 +175,27 @@ export class EmacsClient {
   async readFile(path: string): Promise<string> {
     return this.callJson<string>(`(roambrain-read-file ${elispString(path)})`);
   }
+}
+
+/**
+ * Reverse emacsclient's terminal-safe output encoding for `-e` results.
+ * Server prints via `prin1` and emacsclient encodes spaces as `&_`, newlines
+ * as `&n`, hyphens as `&-`, and ampersands as `&&` before writing to stdout.
+ */
+function decodeEmacsclientOutput(s: string): string {
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === "&" && i + 1 < s.length) {
+      const n = s[i + 1];
+      if (n === "_") { out += " "; i++; continue; }
+      if (n === "n") { out += "\n"; i++; continue; }
+      if (n === "-") { out += "-"; i++; continue; }
+      if (n === "&") { out += "&"; i++; continue; }
+    }
+    out += c;
+  }
+  return out;
 }
 
 /** Quote a JS string as an elisp string literal. */

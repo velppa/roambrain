@@ -23,6 +23,8 @@ export interface OrgPageInput {
   properties?: Record<string, string>;
   compiled_truth: string;
   timeline?: string;
+  /** Opaque content hash (e.g. org-roam files.hash). Used by sync to skip unchanged pages. */
+  content_hash?: string;
 }
 
 export interface PageFilters {

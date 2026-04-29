@@ -142,5 +142,29 @@ Plist keys: :title :tags :properties :compiled_truth :timeline."
                :compiled_truth (car split)
                :timeline       (cdr split)))))))
 
+;;;###autoload
+(defun roambrain-openai-key (&optional host login)
+  "JSON-encoded OpenAI API key from auth-source, or empty.
+Defaults: HOST=\"api.openai.com\", LOGIN=\"hotter-token\"."
+  (require 'auth-source)
+  (let* ((h (or host "api.openai.com"))
+         (l (or login "hotter-token"))
+         (pair (auth-source-user-and-password h l))
+         (secret (cadr pair)))
+    (json-encode (or (and (functionp secret) (funcall secret))
+                     secret
+                     ""))))
+
+;;;###autoload
+(defun roambrain-write-result (path expr-string)
+  "Eval EXPR-STRING (which must return a string), write it to PATH.
+Used to bypass emacsclient's broken framing for large outputs.
+Returns JSON-encoded t on success."
+  (let ((result (eval (car (read-from-string expr-string)) t)))
+    (with-temp-file path
+      (set-buffer-file-coding-system 'utf-8-unix)
+      (insert (if (stringp result) result (format "%S" result)))))
+  (json-encode t))
+
 (provide 'roambrain)
 ;;; roambrain.el ends here
