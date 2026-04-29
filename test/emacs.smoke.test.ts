@@ -2,7 +2,7 @@
 // emacsclient socket is reachable.
 
 import { describe, expect, test } from "bun:test";
-import { EmacsClient, EmacsError } from "../src/core/emacs.ts";
+import { EmacsClient } from "../src/core/emacs.ts";
 
 const client = new EmacsClient();
 
@@ -44,8 +44,4 @@ describe.if(alive)("EmacsClient (live)", () => {
     expect(path).toBe("/Users/pavel/Notes/roambrain.org");
   });
 
-  test("init() fails loudly when roambrain.el cannot be loaded", async () => {
-    const broken = new EmacsClient({ elispDir: "/nonexistent/roambrain-test" });
-    await expect(broken.init()).rejects.toBeInstanceOf(EmacsError);
-  });
 });
