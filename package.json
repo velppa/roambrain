@@ -1,0 +1,32 @@
+{
+  "name": "roambrain",
+  "version": "0.0.1",
+  "description": "Org Roam + Emacs personal knowledge brain with hybrid RAG search. Loose fork of GBrain.",
+  "type": "module",
+  "main": "src/core/index.ts",
+  "bin": {
+    "roambrain": "src/cli.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "build": "bun build --compile --outfile bin/roambrain src/cli.ts",
+    "build:all": "bun build --compile --target=bun-darwin-arm64 --outfile bin/roambrain-darwin-arm64 src/cli.ts && bun build --compile --target=bun-linux-x64 --outfile bin/roambrain-linux-x64 src/cli.ts",
+    "test": "bun run typecheck && bun test --timeout=60000",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "@electric-sql/pglite": "0.4.3",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "openai": "^4.0.0",
+    "pgvector": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  },
+  "trustedDependencies": [
+    "@electric-sql/pglite"
+  ],
+  "license": "MIT"
+}
