@@ -1,0 +1,21 @@
+:PROPERTIES:
+:ID:       SAMPLE-FIXTURE-0001
+:END:
+#+title: Sample Page
+#+filetags: :alpha:beta:
+
+* Feature X
+Some content.
+
+** Subfeature X.Y
+More content.
+
+* Fact
+A standalone fact.
+
+* Insight
+Link to [[id:OTHER][another node]].
+
+* Changelog
+- <2026-04-29 Wed> created the page
+- <2026-04-29 Wed> added insight
