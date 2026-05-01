@@ -8,6 +8,7 @@ import type {
   OrgPage,
   OrgPageInput,
   PageFilters,
+  PageSummary,
   Chunk,
   ChunkInput,
   StaleChunkRow,
@@ -55,7 +56,7 @@ export interface BrainEngine {
   getPage(id: string): Promise<OrgPage | null>;
   putPage(input: OrgPageInput): Promise<OrgPage>;
   deletePage(id: string): Promise<void>;
-  listPages(filters?: PageFilters): Promise<OrgPage[]>;
+  listPages(filters?: PageFilters): Promise<PageSummary[]>;
   /** Every Org Roam ID known to the brain. */
   getAllIds(): Promise<Set<string>>;
   /** Map of page id → stored content_hash (omits pages with NULL hash). */
@@ -78,9 +79,9 @@ export interface BrainEngine {
   removeTag(id: string, tag: string): Promise<void>;
   getTags(id: string): Promise<string[]>;
 
-  // Links -- read from org-roam.db; writes go through Emacs
-  // (insert [[id:...]] in the file, then trigger org-roam-db-sync).
-  addLink(from: string, to: string, context?: string): Promise<void>;
+  // Links -- read from org-roam.db; writes go through Emacs (edit a
+  // `* Related' subtree in the source .org file, save, org-roam-db-sync).
+  addLink(from: string, to: string, title?: string): Promise<void>;
   removeLink(from: string, to: string): Promise<void>;
   getLinks(id: string): Promise<Link[]>;
   getBacklinks(id: string): Promise<Link[]>;

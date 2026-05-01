@@ -148,10 +148,6 @@ export class EmacsClient {
 
   // --- Org Roam helpers (thin wrappers over roambrain.el) ---
 
-  async orgRoamDirectory(): Promise<string> {
-    return this.callJson<string>("(roambrain-org-roam-directory)");
-  }
-
   async orgRoamDbLocation(): Promise<string> {
     return this.callJson<string>("(roambrain-org-roam-db-location)");
   }
@@ -175,6 +171,25 @@ export class EmacsClient {
   async readFile(path: string): Promise<string> {
     return this.callJson<string>(`(roambrain-read-file ${elispString(path)})`);
   }
+
+  async addLink(fromId: string, target: string, title?: string): Promise<void> {
+    const titleArg = title && title.length > 0 ? ` ${elispString(title)}` : "";
+    await this.callJson<true>(
+      `(roambrain-add-link ${elispString(fromId)} ${elispString(target)}${titleArg})`,
+    );
+  }
+
+  async removeLink(fromId: string, target: string): Promise<void> {
+    await this.callJson<true>(
+      `(roambrain-remove-link ${elispString(fromId)} ${elispString(target)})`,
+    );
+  }
+}
+
+/** Subset of EmacsClient used for write-through link mutations. */
+export interface EmacsWriter {
+  addLink(fromId: string, target: string, title?: string): Promise<void>;
+  removeLink(fromId: string, target: string): Promise<void>;
 }
 
 /**

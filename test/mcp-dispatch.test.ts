@@ -17,9 +17,9 @@ beforeEach(async () => {
 });
 
 describe("tool registry", () => {
-  test("exposes 21 tools with unique names", () => {
-    expect(TOOLS).toHaveLength(21);
-    expect(TOOL_BY_NAME.size).toBe(21);
+  test("exposes 24 tools with unique names", () => {
+    expect(TOOLS).toHaveLength(24);
+    expect(TOOL_BY_NAME.size).toBe(24);
   });
 
   test("every tool has type:object inputSchema", () => {

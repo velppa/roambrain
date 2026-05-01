@@ -27,6 +27,14 @@ export interface OrgPageInput {
   content_hash?: string;
 }
 
+/** Lightweight row returned by listPages — no body, just metadata. */
+export interface PageSummary {
+  id: string;
+  title: string;
+  tags: string[];
+  updated_at: Date;
+}
+
 export interface PageFilters {
   tag?: string;
   limit?: number;

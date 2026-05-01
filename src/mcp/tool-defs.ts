@@ -87,7 +87,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "list_pages",
-    description: "List indexed pages, newest first. Optional tag filter and updated_after cutoff.",
+    description: "List indexed pages (id, title, tags, updated_at only — no body), newest first. Optional tag filter and updated_after cutoff.",
     inputSchema: {
       type: "object",
       properties: {
@@ -98,6 +98,27 @@ export const TOOLS: ToolDef[] = [
       },
     },
     handler: async (engine, p) => engine.listPages(p as PageFilters),
+  },
+  {
+    name: "recent_pages",
+    description: "Pages updated in the last N days, newest first. Returns id, title, tags, updated_at — no body.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        days: int("Look-back window in days (default 7)"),
+        tag: str("Optional tag filter"),
+        limit: int("Max rows (default 20)"),
+      },
+    },
+    handler: async (engine, p) => {
+      const days = (p.days as number | undefined) ?? 7;
+      const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+      return engine.listPages({
+        updated_after: cutoff,
+        tag: p.tag as string | undefined,
+        limit: (p.limit as number | undefined) ?? 20,
+      });
+    },
   },
 
   // --- Search ---
@@ -111,6 +132,26 @@ export const TOOLS: ToolDef[] = [
         limit: int("Max results (default 20, max 100)"),
         offset: int("Pagination offset"),
         tag: str("Restrict to pages with this tag"),
+      },
+      required: ["query"],
+    },
+    handler: async (engine, p) => hybridSearch(engine, p.query as string, {
+      limit: p.limit as number | undefined,
+      offset: p.offset as number | undefined,
+      tag: p.tag as string | undefined,
+    }),
+  },
+  {
+    name: "query",
+    description: "Alias of search. Kept for GBrain-compatible callers (e.g. WUPHF) that hardcode the `query` tool name. Same params + response shape as search; `detail` is accepted and ignored.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: str("Search query"),
+        limit: int("Max results (default 20, max 100)"),
+        offset: int("Pagination offset"),
+        tag: str("Restrict to pages with this tag"),
+        detail: str("Ignored. Accepted for GBrain shim compatibility."),
       },
       required: ["query"],
     },
@@ -163,6 +204,39 @@ export const TOOLS: ToolDef[] = [
       required: ["id"],
     },
     handler: async (engine, p) => engine.traverseGraph(p.id as string, p.depth as number | undefined),
+  },
+  {
+    name: "add_link",
+    description: "Add a related link from a page. Inserts into a `* Related` H1 (created before `* Changelog` if missing), saves the file, runs org-roam-db-sync. Target is `id:<uuid>` for Org Roam nodes, or any URL (https://, file://, …). Title is auto-resolved for id: targets.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: str("Source page :ID:"),
+        target: str("`id:<uuid>` for an Org Roam node, or a URL"),
+        title: str("Optional link title (auto-resolved for id: targets)"),
+      },
+      required: ["id", "target"],
+    },
+    handler: async (engine, p) => {
+      await engine.addLink(p.id as string, p.target as string, p.title as string | undefined);
+      return { ok: true };
+    },
+  },
+  {
+    name: "remove_link",
+    description: "Remove a related link from the page's `* Related` subtree (matched by target). Saves the file, runs org-roam-db-sync.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: str("Source page :ID:"),
+        target: str("Link target to remove (`id:<uuid>` or URL)"),
+      },
+      required: ["id", "target"],
+    },
+    handler: async (engine, p) => {
+      await engine.removeLink(p.id as string, p.target as string);
+      return { ok: true };
+    },
   },
   {
     name: "find_orphans",

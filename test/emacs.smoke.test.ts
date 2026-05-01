@@ -27,11 +27,6 @@ describe.if(alive)("EmacsClient (live)", () => {
     expect(a).toEqual([1, 2, 3]);
   });
 
-  test("orgRoamDirectory returns an absolute path", async () => {
-    const dir = await client.orgRoamDirectory();
-    expect(dir.length).toBeGreaterThan(0);
-  });
-
   test("readFile returns the file contents", async () => {
     // roambrain.org is the user's own page; should always exist.
     const txt = await client.readFile("/Users/pavel/Notes/roambrain.org");

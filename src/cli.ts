@@ -36,7 +36,7 @@ switch (cmd) {
   case "tools": runTools();            break;
   case "index": await runIndex(args);  break;
   default:
-    console.error(`roambrain: unknown command '${cmd}'`);
+    process.stderr.write(`roambrain: unknown command '${cmd}'\n`);
     printHelp();
     process.exit(1);
 }
@@ -75,7 +75,10 @@ async function buildEngine(): Promise<BuiltEngine> {
   }
 
   const orgRoam = orgRoamPath ? new OrgRoamDb({ path: orgRoamPath }) : null;
-  const engine = new PgliteEngine({ orgRoam: orgRoam ?? undefined });
+  const engine = new PgliteEngine({
+    orgRoam: orgRoam ?? undefined,
+    emacs: emacsAlive ? emacs : undefined,
+  });
   await engine.connect({ database_path: dbPath });
   await engine.initSchema();
   return { engine, emacs: emacsAlive ? emacs : null, orgRoam };
@@ -89,13 +92,13 @@ async function runMcp(): Promise<void> {
 async function runCall(args: string[]): Promise<void> {
   const [tool, jsonArg] = args;
   if (!tool) {
-    console.error("usage: roambrain call <tool> [<json-params>]");
+    process.stderr.write("usage: roambrain call <tool> [<json-params>]\n");
     process.exit(1);
   }
   let params: Record<string, unknown> = {};
   if (jsonArg) {
     try { params = JSON.parse(jsonArg); }
-    catch (e) { console.error(`invalid JSON: ${(e as Error).message}`); process.exit(1); }
+    catch (e) { process.stderr.write(`invalid JSON: ${(e as Error).message}\n`); process.exit(1); }
   }
   const { engine } = await buildEngine();
   try {
@@ -110,11 +113,11 @@ async function runIndex(args: string[]): Promise<void> {
   const reembed = args.includes("--reembed");
   const { engine, emacs, orgRoam } = await buildEngine();
   if (!emacs || !orgRoam) {
-    console.error("roambrain index: requires Emacs (for parsing) and org-roam.db");
+    process.stderr.write("roambrain index: requires Emacs (for parsing) and org-roam.db\n");
     process.exit(1);
   }
   if (!process.env.OPENAI_API_KEY) {
-    console.error("note: OPENAI_API_KEY not set — chunks will be stored without embeddings");
+    process.stderr.write("note: OPENAI_API_KEY not set — chunks will be stored without embeddings\n");
   }
   try {
     const result = await runSync(engine, emacs, orgRoam, {
@@ -122,7 +125,7 @@ async function runIndex(args: string[]): Promise<void> {
       embedFn: process.env.OPENAI_API_KEY ? (texts) => embedBatch(texts) : undefined,
       onPage: ({ i, n, id, file, skipped }) => {
         if (skipped) return;
-        console.error(`[${i}/${n}] ${id}  ${file}`);
+        process.stderr.write(`[${i}/${n}] ${id}  ${file}\n`);
       },
     });
     console.log(JSON.stringify(result, null, 2));

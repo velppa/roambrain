@@ -13,6 +13,7 @@ import schemaSql from "../schema.sql" with { type: "text" };
 
 import type { BrainEngine } from "./engine.ts";
 import { clampSearchLimit as clampLimit } from "./engine.ts";
+import type { EmacsWriter } from "./emacs.ts";
 import type {
   BrainHealth,
   BrainStats,
@@ -26,6 +27,7 @@ import type {
   OrgPage,
   OrgPageInput,
   PageFilters,
+  PageSummary,
   PageVersion,
   RawData,
   SearchOpts,
@@ -42,6 +44,8 @@ const DEFAULT_DB_PATH = resolve(homedir(), ".config/roambrain/brain.pglite");
 export interface PgliteEngineDeps {
   /** Read-only org-roam.db reader for graph + tags lookups. Optional in tests. */
   orgRoam?: OrgRoamReader;
+  /** Emacs-side editor used by addLink/removeLink. Optional in tests. */
+  emacs?: EmacsWriter;
 }
 
 /** Subset of OrgRoamDb we actually call. Concrete impl lives in org-roam-db.ts. */
@@ -58,9 +62,11 @@ export class PgliteEngine implements BrainEngine {
 
   private pg!: PGlite;
   private orgRoam?: OrgRoamReader;
+  private emacs?: EmacsWriter;
 
   constructor(deps: PgliteEngineDeps = {}) {
     this.orgRoam = deps.orgRoam;
+    this.emacs = deps.emacs;
   }
 
   // --- Lifecycle ---
@@ -137,7 +143,7 @@ export class PgliteEngine implements BrainEngine {
     await this.pg.query(`DELETE FROM pages WHERE id = $1`, [id]);
   }
 
-  async listPages(filters: PageFilters = {}): Promise<OrgPage[]> {
+  async listPages(filters: PageFilters = {}): Promise<PageSummary[]> {
     const where: string[] = [];
     const params: unknown[] = [];
     if (filters.tag) {
@@ -154,12 +160,9 @@ export class PgliteEngine implements BrainEngine {
     params.push(limit, offset);
 
     const r = await this.pg.query<{
-      id: string; file: string; title: string;
-      compiled_truth: string; timeline: string;
-      properties: Record<string, string>;
-      updated_at: Date;
+      id: string; title: string; updated_at: Date;
     }>(
-      `SELECT id, file, title, compiled_truth, timeline, properties, updated_at
+      `SELECT id, title, updated_at
        FROM pages
        ${whereSql}
        ORDER BY updated_at DESC
@@ -404,19 +407,22 @@ export class PgliteEngine implements BrainEngine {
 
   // --- Links (read delegated to org-roam.db; writes via Emacs only) ---
 
-  async addLink(_from: string, _to: string, _context?: string): Promise<void> {
-    throw new RoamBrainError(
-      "Link writes go through Emacs",
-      "RoamBrain doesn't write to org-roam.db directly",
-      "Insert an [[id:...]] link in the source .org file via Emacs and call syncBrain",
-    );
+  async addLink(from: string, to: string, title?: string): Promise<void> {
+    await this.requireEmacs().addLink(from, to, title);
   }
-  async removeLink(_from: string, _to: string): Promise<void> {
-    throw new RoamBrainError(
-      "Link writes go through Emacs",
-      "RoamBrain doesn't write to org-roam.db directly",
-      "Remove the [[id:...]] link in the source .org file via Emacs and call syncBrain",
-    );
+  async removeLink(from: string, to: string): Promise<void> {
+    await this.requireEmacs().removeLink(from, to);
+  }
+
+  private requireEmacs(): EmacsWriter {
+    if (!this.emacs) {
+      throw new RoamBrainError(
+        "Emacs writer not configured",
+        "Engine constructed without an EmacsWriter",
+        "Pass `{ emacs: emacsClient }` to PgliteEngine",
+      );
+    }
+    return this.emacs;
   }
 
   async getLinks(id: string): Promise<Link[]> {

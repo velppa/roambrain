@@ -1,0 +1,100 @@
+#+title: RoamBrain
+#+startup: overview
+
+Org Roam + Emacs personal knowledge brain with hybrid RAG search,
+exposed over [[https://modelcontextprotocol.io][MCP]].
+
+Loose fork of [[https://github.com/garrytan/gbrain][GBrain]] by Garry Tan,
+focused on Org Mode files managed by Org Roam and driven via
+=emacsclient=.
+
+* Status
+
+Pre-alpha. Engine, MCP surface, and indexing work end-to-end; skills
+are not ported yet. See ~plan.org~ in the workspace at
+~~/Sync/260429--roambrain/~ for the roadmap.
+
+* What's there
+
+- *Engine* — PGLite (in-process Postgres + pgvector) for chunks and
+  embeddings; metadata mirrored from ~org-roam.db~.
+- *Org Roam adapter* — read-only SQLite reader for nodes, links,
+  backlinks, tags, and per-file SHA1 hashes.
+- *Emacs adapter* — ~emacsclient -e~ wrapper plus elisp helpers in
+  ~elisp/roambrain.el~ (parse file, split changelog, fetch OpenAI key
+  from auth-source). Routes large outputs through a temp file to dodge
+  emacs server's chunked-print framing limits.
+- *MCP surface* — 21 tools via the official MCP SDK over stdio (same
+  shape as GBrain).
+- *Indexing* — bulk walk of the org-roam graph plus incremental
+  reindex by file hash. ~roambrain index~ on an unchanged 894-page
+  corpus runs in ~0.2s.
+
+* Requirements
+
+- [[https://bun.sh][Bun]] ≥ 1.3
+- Emacs with [[https://www.orgroam.com][Org Roam]] running as a server
+  (~M-x server-start~ or ~emacs --daemon~)
+- ~OPENAI_API_KEY~ for embeddings — auto-pulled from ~auth-source~
+  (~api.openai.com~ / ~hotter-token~) when not set in the environment.
+
+* Install
+
+#+begin_src sh
+git clone <repo> ~/.velppa/roambrain
+cd ~/.velppa/roambrain
+bun install
+bun link              # register the package
+bun link roambrain    # symlink `roambrain` into ~/.bun/bin
+#+end_src
+
+Make sure ~~/.bun/bin~ is on your =PATH=.
+
+Tell Emacs about the helper elisp:
+
+#+begin_src elisp
+(load-file "~/.velppa/roambrain/elisp/roambrain.el")
+#+end_src
+
+(or ~(add-to-list 'load-path …)~ + ~(require 'roambrain)~).
+
+* Use
+
+#+begin_src sh
+roambrain mcp                    # start MCP stdio server
+roambrain index                  # incremental reindex (skips unchanged)
+roambrain index --reembed        # force re-embed everything
+roambrain tools                  # list registered MCP tools
+roambrain call <tool> '<json>'   # invoke a tool directly (debugging)
+#+end_src
+
+Override defaults via env:
+
+- =ROAMBRAIN_DB= — PGLite data dir (default ~~/.config/roambrain/brain.pglite~)
+- =ROAMBRAIN_ORG_ROAM_DB= — path to ~org-roam.db~ (default queried from Emacs)
+
+* Reindexing model
+
+Indexing reuses Org Roam's own SHA1 of each file (~files.hash~). On
+each ~roambrain index~, only files whose hash differs from the
+last-stored value are re-parsed, re-chunked, and (for changed chunks
+only) re-embedded. To pick up edits you've made by hand, run
+~M-x org-roam-db-sync~ first so org-roam recomputes its hashes.
+
+* Layout
+
+#+begin_example
+src/
+  cli.ts           entrypoint
+  core/            engine, chunkers, search, embedding, sync
+  mcp/             MCP stdio server + tool defs + dispatcher
+  schema.sql       PGLite schema (pages, chunks, tags, …)
+elisp/
+  roambrain.el     emacs-side helpers (parse, auth-source, write-result)
+test/              bun:test suites
+plan.org           roadmap (in the workspace, not the repo)
+#+end_example
+
+* License
+
+MIT. See ~LICENSE~. Derived from GBrain, also MIT.

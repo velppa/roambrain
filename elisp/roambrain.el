@@ -13,9 +13,13 @@
 
 (require 'json)
 (require 'subr-x)
+(require 'cl-lib)
 
 (defconst roambrain-changelog-heading "Changelog"
   "Top-level heading whose subtree is treated as the page's timeline.")
+
+(defconst roambrain-related-heading "Related"
+  "Top-level heading whose subtree holds outbound related links.")
 
 ;; --- Internal helpers ---
 
@@ -68,12 +72,6 @@ subtree; TIMELINE is the body of that heading (without the heading line)."
             ""))))
 
 ;; --- Public API (all return JSON strings) ---
-
-;;;###autoload
-(defun roambrain-org-roam-directory ()
-  "JSON-encoded string with `org-roam-directory' (or empty)."
-  (json-encode
-   (or (and (boundp 'org-roam-directory) org-roam-directory) "")))
 
 ;;;###autoload
 (defun roambrain-org-roam-db-location ()
@@ -154,6 +152,140 @@ Defaults: HOST=\"api.openai.com\", LOGIN=\"hotter-token\"."
     (json-encode (or (and (functionp secret) (funcall secret))
                      secret
                      ""))))
+
+;; --- Related-links editor ---
+
+(defun roambrain--find-h1 (heading-text)
+  "Search forward from point-min for an H1 line `* HEADING-TEXT'.
+Leaves point at the heading line and returns its beginning, or nil."
+  (goto-char (point-min))
+  (let ((re (format "^\\* %s\\(?:[ \t]+:[^\n]*:\\)?[ \t]*$"
+                    (regexp-quote heading-text))))
+    (when (re-search-forward re nil t)
+      (line-beginning-position))))
+
+(defun roambrain--related-bounds ()
+  "Return (HEAD-BEG . SUBTREE-END) covering the * Related heading + body, or nil."
+  (save-excursion
+    (when (roambrain--find-h1 roambrain-related-heading)
+      (let ((head-beg (line-beginning-position))
+            (subtree-end (save-excursion
+                           (forward-line 1)
+                           (if (re-search-forward "^\\* " nil t)
+                               (line-beginning-position)
+                             (point-max)))))
+        (cons head-beg subtree-end)))))
+
+(defun roambrain--parse-link-line (line)
+  "Parse `- [[TARGET][TITLE]]' or `- [[TARGET]]'. Return (TARGET . TITLE) or nil."
+  (cond
+   ((string-match "\\`[ \t]*-[ \t]+\\[\\[\\([^][]+\\)\\]\\[\\([^][]+\\)\\]\\][ \t]*\\'" line)
+    (cons (match-string 1 line) (match-string 2 line)))
+   ((string-match "\\`[ \t]*-[ \t]+\\[\\[\\([^][]+\\)\\]\\][ \t]*\\'" line)
+    (cons (match-string 1 line) nil))))
+
+(defun roambrain--read-related-links ()
+  "Return a list of (TARGET . TITLE) parsed from the * Related body."
+  (let ((bounds (roambrain--related-bounds)))
+    (when bounds
+      (let* ((text (buffer-substring-no-properties (car bounds) (cdr bounds)))
+             acc)
+        (dolist (line (split-string text "\n"))
+          (let ((p (roambrain--parse-link-line line)))
+            (when p (push p acc))))
+        (nreverse acc)))))
+
+(defun roambrain--render-link (entry)
+  (let ((target (car entry)) (title (cdr entry)))
+    (if (and title (not (string-empty-p title)))
+        (format "- [[%s][%s]]" target title)
+      (format "- [[%s]]" target))))
+
+(defun roambrain--write-related-links (links)
+  "Replace (or remove) the * Related subtree to contain LINKS.
+If LINKS is empty and the heading exists, the whole subtree is removed.
+If LINKS is non-empty and the heading is missing, insert it before
+* Changelog (or at end of buffer)."
+  (let ((bounds (roambrain--related-bounds)))
+    (cond
+     ((and bounds (null links))
+      (delete-region (car bounds) (cdr bounds)))
+     (bounds
+      (let ((body (mapconcat #'roambrain--render-link links "\n")))
+        (delete-region (car bounds) (cdr bounds))
+        (goto-char (car bounds))
+        (insert (format "* %s\n%s\n\n" roambrain-related-heading body))))
+     (links
+      (let* ((body (mapconcat #'roambrain--render-link links "\n"))
+             (insert-pt (save-excursion
+                          (or (and (roambrain--find-h1 roambrain-changelog-heading)
+                                   (line-beginning-position))
+                              (point-max)))))
+        (goto-char insert-pt)
+        (unless (or (bobp)
+                    (save-excursion (forward-char -1) (bolp)))
+          (insert "\n"))
+        (insert (format "* %s\n%s\n\n" roambrain-related-heading body)))))))
+
+(defun roambrain--normalize-target (target)
+  "Lowercase the `id:' / `ID:' scheme; otherwise return TARGET unchanged."
+  (cond
+   ((string-match "\\`ID:\\(.+\\)\\'" target) (concat "id:" (match-string 1 target)))
+   (t target)))
+
+(defun roambrain--upsert-link (links target title)
+  (let ((found nil)
+        (out (mapcar (lambda (e)
+                       (if (string= (car e) target)
+                           (progn (setq found t)
+                                  (cons target (or title (cdr e))))
+                         e))
+                     links)))
+    (if found out (append out (list (cons target title))))))
+
+;;;###autoload
+(defun roambrain-add-link (from-id target &optional title)
+  "Add a related link from FROM-ID's page to TARGET (with optional TITLE).
+Inserts/updates a `* Related' H1 placed before `* Changelog', saves the
+buffer, and runs `org-roam-db-sync'. Returns JSON-encoded t."
+  (require 'org-roam)
+  (let* ((node (org-roam-node-from-id from-id))
+         (file (and node (org-roam-node-file node))))
+    (unless file (error "roambrain-add-link: unknown node id %s" from-id))
+    (with-current-buffer (find-file-noselect file)
+      (save-restriction
+        (widen)
+        (let* ((normalized (roambrain--normalize-target target))
+               (resolved-title
+                (or (and title (not (string-empty-p title)) title)
+                    (when (string-match "\\`id:\\(.+\\)\\'" normalized)
+                      (let ((tnode (org-roam-node-from-id (match-string 1 normalized))))
+                        (and tnode (org-roam-node-title tnode))))))
+               (existing (roambrain--read-related-links))
+               (updated  (roambrain--upsert-link existing normalized resolved-title)))
+          (roambrain--write-related-links updated)
+          (save-buffer)))))
+  (org-roam-db-sync)
+  (json-encode t))
+
+;;;###autoload
+(defun roambrain-remove-link (from-id target)
+  "Remove the related link from FROM-ID's page to TARGET (matched by target).
+Saves the buffer and runs `org-roam-db-sync'. Returns JSON-encoded t."
+  (require 'org-roam)
+  (let* ((node (org-roam-node-from-id from-id))
+         (file (and node (org-roam-node-file node))))
+    (unless file (error "roambrain-remove-link: unknown node id %s" from-id))
+    (with-current-buffer (find-file-noselect file)
+      (save-restriction
+        (widen)
+        (let* ((normalized (roambrain--normalize-target target))
+               (existing (roambrain--read-related-links))
+               (filtered (cl-remove-if (lambda (e) (string= (car e) normalized)) existing)))
+          (roambrain--write-related-links filtered)
+          (save-buffer)))))
+  (org-roam-db-sync)
+  (json-encode t))
 
 ;;;###autoload
 (defun roambrain-write-result (path expr-string)
