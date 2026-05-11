@@ -64,16 +64,6 @@ async function buildEngine(): Promise<BuiltEngine> {
     }
   }
 
-  // Pull OPENAI_API_KEY from auth-source if not already in env.
-  if (!process.env.OPENAI_API_KEY && emacsAlive) {
-    try {
-      const key = await emacs.callJson<string>("(roambrain-openai-key)");
-      if (key) process.env.OPENAI_API_KEY = key;
-    } catch {
-      // non-fatal
-    }
-  }
-
   const orgRoam = orgRoamPath ? new OrgRoamDb({ path: orgRoamPath }) : null;
   const engine = new PgliteEngine({
     orgRoam: orgRoam ?? undefined,

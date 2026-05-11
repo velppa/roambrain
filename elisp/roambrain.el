@@ -1,7 +1,27 @@
 ;;; roambrain.el --- Emacs-side helpers for RoamBrain  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2026 Pavel Popov
-;; License: MIT
+;; Copyright (C) 2025 Pavel Popov
+
+;; Author: Pavel Popov
+;; URL: https://github.com/velppa/VELPA
+;; Version: 0.1.0
+;; Package-Requires: ((emacs "30.1"))
+;; Keywords: tools, workflow
+
+;; This file is not part of GNU Emacs.
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
@@ -14,6 +34,7 @@
 (require 'json)
 (require 'subr-x)
 (require 'cl-lib)
+(require 'rx)
 
 (defconst roambrain-changelog-heading "Changelog"
   "Top-level heading whose subtree is treated as the page's timeline.")
@@ -28,13 +49,16 @@
   (let (acc)
     (save-excursion
       (goto-char (point-min))
-      (when (looking-at "^:PROPERTIES:[ \t]*\n")
+      (when (looking-at (rx bol ":PROPERTIES:" (* (any " \t")) "\n"))
         (let ((pend (save-excursion
-                      (re-search-forward "^:END:[ \t]*$" nil t))))
+                      (re-search-forward
+                       (rx bol ":END:" (* (any " \t")) eol) nil t))))
           (when pend
             (forward-line 1)
             (while (re-search-forward
-                    "^:\\([^:]+\\):[ \t]+\\(.*\\)$" pend t)
+                    (rx bol ":" (group (+ (not (any ":")))) ":"
+                        (+ (any " \t")) (group (* nonl)) eol)
+                    pend t)
               (push (cons (match-string-no-properties 1)
                           (match-string-no-properties 2))
                     acc))))))
@@ -149,9 +173,7 @@ Defaults: HOST=\"api.openai.com\", LOGIN=\"hotter-token\"."
          (l (or login "hotter-token"))
          (pair (auth-source-user-and-password h l))
          (secret (cadr pair)))
-    (json-encode (or (and (functionp secret) (funcall secret))
-                     secret
-                     ""))))
+    (json-encode secret)))
 
 ;; --- Related-links editor ---
 
@@ -159,8 +181,11 @@ Defaults: HOST=\"api.openai.com\", LOGIN=\"hotter-token\"."
   "Search forward from point-min for an H1 line `* HEADING-TEXT'.
 Leaves point at the heading line and returns its beginning, or nil."
   (goto-char (point-min))
-  (let ((re (format "^\\* %s\\(?:[ \t]+:[^\n]*:\\)?[ \t]*$"
-                    (regexp-quote heading-text))))
+  (let ((re (rx-to-string
+             `(seq bol "* " ,heading-text
+                   (? (+ (any " \t")) ":" (* (not (any "\n"))) ":")
+                   (* (any " \t")) eol)
+             t)))
     (when (re-search-forward re nil t)
       (line-beginning-position))))
 
@@ -171,7 +196,7 @@ Leaves point at the heading line and returns its beginning, or nil."
       (let ((head-beg (line-beginning-position))
             (subtree-end (save-excursion
                            (forward-line 1)
-                           (if (re-search-forward "^\\* " nil t)
+                           (if (re-search-forward (rx bol "* ") nil t)
                                (line-beginning-position)
                              (point-max)))))
         (cons head-beg subtree-end)))))
@@ -179,9 +204,16 @@ Leaves point at the heading line and returns its beginning, or nil."
 (defun roambrain--parse-link-line (line)
   "Parse `- [[TARGET][TITLE]]' or `- [[TARGET]]'. Return (TARGET . TITLE) or nil."
   (cond
-   ((string-match "\\`[ \t]*-[ \t]+\\[\\[\\([^][]+\\)\\]\\[\\([^][]+\\)\\]\\][ \t]*\\'" line)
+   ((string-match (rx string-start (* (any " \t")) "-" (+ (any " \t"))
+                      "[[" (group (+ (not (any "][")))) "]"
+                      "[" (group (+ (not (any "][")))) "]]"
+                      (* (any " \t")) string-end)
+                  line)
     (cons (match-string 1 line) (match-string 2 line)))
-   ((string-match "\\`[ \t]*-[ \t]+\\[\\[\\([^][]+\\)\\]\\][ \t]*\\'" line)
+   ((string-match (rx string-start (* (any " \t")) "-" (+ (any " \t"))
+                      "[[" (group (+ (not (any "][")))) "]]"
+                      (* (any " \t")) string-end)
+                  line)
     (cons (match-string 1 line) nil))))
 
 (defun roambrain--read-related-links ()
@@ -230,17 +262,18 @@ If LINKS is non-empty and the heading is missing, insert it before
 (defun roambrain--normalize-target (target)
   "Lowercase the `id:' / `ID:' scheme; otherwise return TARGET unchanged."
   (cond
-   ((string-match "\\`ID:\\(.+\\)\\'" target) (concat "id:" (match-string 1 target)))
+   ((string-match (rx string-start "ID:" (group (+ nonl)) string-end) target)
+    (concat "id:" (match-string 1 target)))
    (t target)))
 
 (defun roambrain--upsert-link (links target title)
-  (let ((found nil)
-        (out (mapcar (lambda (e)
-                       (if (string= (car e) target)
-                           (progn (setq found t)
-                                  (cons target (or title (cdr e))))
-                         e))
-                     links)))
+  (let* ((found nil)
+         (out (mapcar (lambda (e)
+                        (if (string= (car e) target)
+                            (progn (setq found t)
+                                   (cons target (or title (cdr e))))
+                          e))
+                      links)))
     (if found out (append out (list (cons target title))))))
 
 ;;;###autoload
@@ -258,7 +291,7 @@ buffer, and runs `org-roam-db-sync'. Returns JSON-encoded t."
         (let* ((normalized (roambrain--normalize-target target))
                (resolved-title
                 (or (and title (not (string-empty-p title)) title)
-                    (when (string-match "\\`id:\\(.+\\)\\'" normalized)
+                    (when (string-match (rx string-start "id:" (group (+ nonl)) string-end) normalized)
                       (let ((tnode (org-roam-node-from-id (match-string 1 normalized))))
                         (and tnode (org-roam-node-title tnode))))))
                (existing (roambrain--read-related-links))
