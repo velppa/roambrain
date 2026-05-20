@@ -65,7 +65,10 @@ export class EmacsClient {
   private async doInit(): Promise<void> {
     const elispFile = resolve(this.elispDir, "roambrain.el");
     const expr = `(condition-case err
-            (progn (load-file ${elispString(elispFile)}) (json-encode "ok"))
+            (progn
+              (unless (featurep 'roambrain)
+                (load-file ${elispString(elispFile)}))
+              (json-encode "ok"))
           (error (json-encode (format "ERR: %S" err))))`;
     const out = await this.evalRaw(expr);
     const result = JSON.parse(JSON.parse(out.trimEnd()) as string) as string;

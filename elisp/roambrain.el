@@ -42,6 +42,18 @@
 (defconst roambrain-related-heading "Related"
   "Top-level heading whose subtree holds outbound related links.")
 
+(defcustom roambrain-executable "roambrain"
+  "Path to the `roambrain' CLI binary."
+  :type 'string
+  :group 'roambrain)
+
+(defcustom roambrain-db nil
+  "Absolute path to the PGLite brain DB. When non-nil, exported as
+`ROAMBRAIN_DB' for every CLI invocation. Nil = use CLI default
+(~/.config/roambrain/brain.pglite)."
+  :type '(choice (const :tag "Default (brain.pglite)" nil) string)
+  :group 'roambrain)
+
 ;; --- Internal helpers ---
 
 (defun roambrain--top-properties ()
@@ -330,6 +342,67 @@ Returns JSON-encoded t on success."
       (set-buffer-file-coding-system 'utf-8-unix)
       (insert (if (stringp result) result (format "%S" result)))))
   (json-encode t))
+
+;; --- CLI bridge ---
+
+(defun roambrain--call-tool (tool params)
+  "Invoke `roambrain call TOOL JSON' and return parsed JSON.
+PARAMS is an alist; passed to the CLI as JSON. Signals on non-zero exit."
+  (let* ((json-params (json-encode (or params '())))
+         (out-buf (generate-new-buffer " *roambrain-call*"))
+         (err-file (make-temp-file "roambrain-err-"))
+         (process-environment
+          (let ((env process-environment))
+            (when roambrain-db
+              (push (concat "ROAMBRAIN_DB=" (expand-file-name roambrain-db)) env))
+            (when (and (boundp 'org-roam-db-location) org-roam-db-location)
+              (push (concat "ROAMBRAIN_ORG_ROAM_DB="
+                            (expand-file-name org-roam-db-location))
+                    env))
+            env))
+         exit)
+    (unwind-protect
+        (progn
+          (setq exit (call-process roambrain-executable nil
+                                   (list out-buf err-file) nil
+                                   "call" tool json-params))
+          (unless (zerop exit)
+            (error "roambrain call %s exit %d: %s"
+                   tool exit
+                   (with-temp-buffer
+                     (insert-file-contents err-file)
+                     (buffer-string))))
+          (with-current-buffer out-buf
+            (goto-char (point-min))
+            (let ((json-object-type 'alist)
+                  (json-array-type 'list)
+                  (json-key-type 'symbol)
+                  (json-false nil)
+                  (json-null nil))
+              (json-read))))
+      (kill-buffer out-buf)
+      (delete-file err-file))))
+
+;;;###autoload
+(cl-defun roambrain-query (query &key (limit 20) tag (offset 0))
+  "Run RoamBrain `query' search for QUERY. Return parsed result (alist).
+Keys: :limit (default 20, max 100), :tag, :offset (default 0)."
+  (interactive
+   (list (read-string "RoamBrain query: ")
+         :limit (if current-prefix-arg (read-number "Limit: " 20) 20)))
+  (let ((params `(("query"  . ,query)
+                  ("limit"  . ,limit)
+                  ("offset" . ,offset))))
+    (when (and tag (not (string-empty-p tag)))
+      (setq params (append params `(("tag" . ,tag)))))
+    (let ((result (roambrain--call-tool "query" params)))
+      (when (called-interactively-p 'any)
+        (with-current-buffer (get-buffer-create "*RoamBrain Query*")
+          (erase-buffer)
+          (insert (pp-to-string result))
+          (goto-char (point-min))
+          (display-buffer (current-buffer))))
+      result)))
 
 (provide 'roambrain)
 ;;; roambrain.el ends here
